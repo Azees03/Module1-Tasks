@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Eduverse - 3D Interactive Learning</title>
+  
+  <!-- Global error handler strictly before any modules load -->
+  <script>
+    window.onerror = function(message, source, lineno, colno, error) {
+      document.body.innerHTML += '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(220,38,38,0.95);z-index:999999;display:flex;align-items:center;justify-content:center;color:white;font-family:sans-serif;flex-direction:column;padding:2rem;text-align:center;">' +
+        '<h1 style="font-size:3rem;margin-bottom:1rem;font-weight:900;letter-spacing:-1px;">Fatal Runtime Exception</h1>' +
+        '<p style="font-size:1.5rem;background:rgba(0,0,0,0.5);padding:1.5rem;border-radius:15px;max-width:800px;font-family:monospace;word-wrap:break-word;">' + (error ? error.message : message) + '</p>' +
+        '<p style="margin-top:2rem;opacity:0.8;">Check the browser console or network tab for failed resource requests.</p>' +
+        '</div>';
+      return false;
+    };
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Full Import Map with TWEEN.js added -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom": "https://esm.sh/react-dom@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "three": "https://esm.sh/three@0.160.0",
+        "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.12?external=react,react-dom,three",
+        "@react-three/drei": "https://esm.sh/@react-three/drei@9.96.1?external=react,react-dom,three,@react-three/fiber",
+        "suspend-react": "https://esm.sh/suspend-react@0.1.3?external=react",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react",
+        "framer-motion": "https://esm.sh/framer-motion@11.0.8?external=react,react-dom",
+        "@tweenjs/tween.js": "https://esm.sh/@tweenjs/tween.js@23.1.1",
+        "htm": "https://esm.sh/htm@3.1.1"
+      }
+    }
+  </script>
+  <style>
+    body { 
+      margin: 0; 
+      padding: 0; 
+      background-color: #0a0a0a; /* Explicit Dark Space Core Theme */
+      color: white; 
+      overflow: hidden; 
+      font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+    }
+    #root { width: 100vw; height: 100vh; }
+    
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+
+    .glass {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .glass-card {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.01));
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+      transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
+    }
+    .glass-card:hover {
+      transform: translateY(-8px) scale(1.02);
+      box-shadow: 0 20px 40px 0 rgba(31, 38, 135, 0.4);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+  </style>
+</head>
+<body class="antialiased">
+  <div id="root"></div>
+
+  <script type="module">
+    import React, { useState, useRef, useMemo, useEffect, Suspense } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import * as THREE from 'three';
+    import { Canvas, useFrame, useThree } from '@react-three/fiber';
+    import { OrbitControls, Stars, Html, Line, Environment } from '@react-three/drei';
+    import { Atom, Compass, Globe2, Shapes, RotateCcw, Check, Sparkles, BookOpen, Trophy, Award } from 'lucide-react';
+    import { motion, AnimatePresence } from 'framer-motion';
+    import * as TWEEN from '@tweenjs/tween.js';
+    import htm from 'htm';
+
+    const html = htm.bind(React.createElement);
+
+    /* --- GLOBAL TWEEN UPDATER --- */
+    const TweenRoot = () => {
+      useFrame(() => {
+        TWEEN.update();
+      });
+      return null;
+    };
+
+    /* --- REWARD SYSTEM --- */
+    const RewardContext = React.createContext();
+
+    const REWARD_DEFS = [
+      { id: 'science_temp', title: 'Thermal Explorer', desc: 'Adjusted the particle temperature', icon: 'Atom', color: '#06b6d4' },
+      { id: 'math_solve', title: 'Coordinate Master', desc: 'Solved a Vertex Weaver challenge', icon: 'Shapes', color: '#3b82f6' },
+      { id: 'history_visit', title: 'Time Traveler', desc: 'Visited 2 historical landmarks', icon: 'Globe2', color: '#f59e0b' },
+      { id: 'language_solve', title: 'Grammar Architect', desc: 'Built a correct sentence', icon: 'BookOpen', color: '#8b5cf6' },
+      { id: 'geo_explore', title: 'Plate Tectonician', desc: 'Explored convergent & divergent forces', icon: 'Compass', color: '#10b981' },
+    ];
+
+    const useRewards = () => React.useContext(RewardContext);
+
+    const RewardToast = ({ reward, onDone }) => {
+      useEffect(() => { const t = setTimeout(onDone, 4000); return () => clearTimeout(t); }, []);
+      return html`
+        <${motion.div}
+          initial=${{ opacity: 0, y: 60, scale: 0.8 }}
+          animate=${{ opacity: 1, y: 0, scale: 1 }}
+          exit=${{ opacity: 0, y: -30, scale: 0.9 }}
+          transition=${{ type: 'spring', damping: 15 }}
+          className="fixed bottom-8 right-8 z-[200] glass bg-[#0a0a0a]/90 border border-amber-500/50 rounded-2xl px-8 py-5 flex items-center space-x-5 shadow-[0_0_40px_rgba(245,158,11,0.2)] max-w-md"
+        >
+          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center shadow-lg flex-shrink-0">
+            <${Trophy} size=${28} className="text-white" />
+          </div>
+          <div>
+            <p className="text-amber-400 font-black text-lg tracking-tight">${reward.title}</p>
+            <p className="text-white/60 text-sm font-light">${reward.desc}</p>
+          </div>
+        <//>
+      `;
+    };
+
+    const RewardProvider = ({ children }) => {
+      const [earned, setEarned] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('eduverse_rewards') || '[]'); } catch(e) { return []; }
+      });
+      const [toastQueue, setToastQueue] = useState([]);
+
+      const grant = (rewardId) => {
+        if (earned.includes(rewardId)) return;
+        const def = REWARD_DEFS.find(r => r.id === rewardId);
+        if (!def) return;
+        const next = [...earned, rewardId];
+        setEarned(next);
+        localStorage.setItem('eduverse_rewards', JSON.stringify(next));
+        setToastQueue(q => [...q, def]);
+      };
+
+      const dismissToast = () => setToastQueue(q => q.slice(1));
+
+      return html`
+        <${RewardContext.Provider} value=${{ earned, grant, REWARD_DEFS }}>
+          ${children}
+          <${AnimatePresence}>
+            ${toastQueue.length > 0 && html`<${RewardToast} key=${toastQueue[0].id} reward=${toastQueue[0]} onDone=${dismissToast} />`}
+          <//>
+        <//>
+      `;
+    };
+
+    /* --- REACT ERROR BOUNDARY --- */
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      static getDerivedStateFromError(error) { return { hasError: true, error }; }
+      componentDidCatch(error, errorInfo) { console.error("Eduverse 3D Exception:", error, errorInfo); }
+      render() {
+        if (this.state.hasError) {
+          return html`
+            <div className="absolute inset-0 flex items-center justify-center bg-red-900/40 backdrop-blur-md z-[9999]">
+              <div className="text-center p-12 bg-black/70 rounded-[2rem] border border-red-500/50 shadow-2xl max-w-lg">
+                <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500">
+                  <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                </div>
+                <h1 className="text-4xl font-black text-white mb-4 tracking-tighter">Anomaly Detected</h1>
+                <p className="text-red-300 font-mono text-xs p-4 bg-red-950/50 rounded-lg break-words mb-8">${this.state.error.message}</p>
+                <button onClick=${() => window.location.reload()} className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-full transition-all shadow-[0_0_20px_rgba(220,38,38,0.5)] tracking-widest uppercase">Reboot Subsystem</button>
+              </div>
+            </div>
+          `;
+        }
+        return this.props.children;
+      }
+    }
+
+    const GlobalLoader = () => html`
+      <${Html} center>
+        <div className="flex flex-col items-center">
+            <div className="w-16 h-16 border-4 border-[#3b82f6] border-t-transparent rounded-full animate-spin shadow-[0_0_15px_#3b82f6]"></div>
+            <p className="mt-6 font-black tracking-widest uppercase text-[#3b82f6] animate-pulse text-sm">Materializing...</p>
+        </div>
+      <//>
+    `;
+
+    /* --- 0. SCIENCE MODULE (PARTICLE SIMULATION) --- */
+    const ParticleSimulation = ({ tempMultiplier }) => {
+      const COUNT = 500, BOX = 10;
+      const meshRef = useRef();
+      const initRef = useRef(false);
+      const dummy = useMemo(() => new THREE.Object3D(), []);
+      const particles = useMemo(() => {
+        const arr = [];
+        for (let i = 0; i < COUNT; i++) {
+          arr.push({
+            pos: new THREE.Vector3((Math.random()-.5)*(BOX-1),(Math.random()-.5)*(BOX-1),(Math.random()-.5)*(BOX-1)),
+            vel: new THREE.Vector3((Math.random()-.5)*5,(Math.random()-.5)*5,(Math.random()-.5)*5),
+            color: new THREE.Color().setHSL(0.55, 0.9, 0.55)
+          });
+        }
+        return arr;
+      }, []);
+
+      useFrame((_, delta) => {
+        if (!meshRef.current) return;
+        const mesh = meshRef.current;
+        const dt = Math.min(delta, 0.1) * tempMultiplier * 2;
+        const lim = BOX/2 - 0.2;
+        for (let i = 0; i < COUNT; i++) {
+          const p = particles[i];
+          p.pos.addScaledVector(p.vel, dt);
+          ['x','y','z'].forEach(a => { if (Math.abs(p.pos[a]) > lim) { p.pos[a] = Math.sign(p.pos[a]) * lim; p.vel[a] *= -1; }});
+          const spd = p.vel.length() * tempMultiplier;
+          p.color.setHSL(Math.max(0, 0.6 - (spd/20)*0.6), 1, 0.55);
+          mesh.setColorAt(i, p.color);
+          dummy.position.copy(p.pos); dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      });
+
+      return html`
+        <instancedMesh ref=${meshRef} args=${[null, null, COUNT]}>
+          <sphereGeometry args=${[0.18, 12, 12]} />
+          <meshStandardMaterial color="#60a5fa" emissive="#3b82f6" emissiveIntensity=${0.5} roughness=${0.4} />
+        </instancedMesh>
+      `;
+    };
+
+    const ScienceCanvas = () => {
+      const [temperature, setTemperature] = useState(1);
+      const { grant } = useRewards();
+      const handleTempChange = (e) => {
+        const val = parseFloat(e.target.value);
+        setTemperature(val);
+        if (val !== 1) grant('science_temp');
+      };
+      return html`
+        <div className="w-full h-full relative">
+          <${Canvas} camera=${{ position: [0, 0, 18], fov: 60 }}>
+            <${Suspense} fallback=${html`<${GlobalLoader} />`}>
+              <ambientLight intensity=${0.4} />
+              <pointLight position=${[15, 15, 15]} intensity=${1.5} />
+              <pointLight position=${[-15, -15, -15]} intensity=${0.8} color="#4f46e5" />
+              <${OrbitControls} makeDefault enablePan=${false} autoRotate autoRotateSpeed=${0.3} maxDistance=${40} minDistance=${5} />
+              <${Stars} radius=${100} depth=${50} count=${4000} factor=${6} saturation=${0} />
+              <group>
+                <lineSegments>
+                  <edgesGeometry args=${[new THREE.BoxGeometry(10, 10, 10)]} />
+                  <lineBasicMaterial color="#3b82f6" transparent opacity=${0.4} />
+                </lineSegments>
+                <${ParticleSimulation} tempMultiplier=${temperature} />
+              </group>
+            <//>
+          <//>
+          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 p-[1px] rounded-2xl bg-gradient-to-r from-blue-500/30 to-purple-500/30">
+            <div className="glass px-8 py-6 rounded-2xl w-80 md:w-96 flex flex-col items-center">
+              <h3 className="font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-300 to-indigo-300 mb-6 uppercase tracking-widest text-sm">System Temperature</h3>
+              <input type="range" min="0.1" max="5" step="0.1" value=${temperature} onChange=${handleTempChange}
+                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-[0_0_15px_rgba(255,255,255,0.8)]"
+                style=${{ background: `linear-gradient(to right, #3b82f6 ${(temperature/5)*100}%, #1e293b ${(temperature/5)*100}%)` }}
+              />
+              <div className="flex justify-between w-full mt-4 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                <span className="text-blue-400">Absolute Zero</span><span className="text-rose-500">Plasma</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
+    /* --- 1. MATH MODULE (VERTEX WEAVER) --- */
+    const mathChallenges = [
+      { q: 'Plot a right triangle with vertices at (0,0,0), (4,0,0), and (0,3,0).', targets: [[0,0,0],[4,0,0],[0,0,3]], tolerance: 0.8 },
+      { q: 'Plot a square with corners at (-3,0,-3), (3,0,-3), (3,0,3), (-3,0,3).', targets: [[-3,0,-3],[3,0,-3],[3,0,3],[-3,0,3]], tolerance: 0.8 },
+      { q: 'Plot a line segment from (-5,0,0) to (5,0,0).', targets: [[-5,0,0],[5,0,0]], tolerance: 0.8 },
+    ];
+
+    const VertexWeaverCanvas = () => {
+      const [vertices, setVertices] = useState([]);
+      const [challengeIdx, setChallengeIdx] = useState(0);
+      const [result, setResult] = useState(null);
+      const { grant } = useRewards();
+      const challenge = mathChallenges[challengeIdx];
+      
+      const handleGridClick = (e) => {
+        if(vertices.length < 8) {
+          e.stopPropagation();
+          setVertices([...vertices, Object.values(e.point).map(v => Number(v.toFixed(2)))]);
+          setResult(null);
+        }
+      };
+
+      const checkAnswer = () => {
+        const targets = challenge.targets;
+        const tol = challenge.tolerance;
+        if (vertices.length < targets.length) { setResult('incomplete'); return; }
+        let matched = 0;
+        targets.forEach(t => {
+          if (vertices.some(v => Math.abs(v[0]-t[0]) < tol && Math.abs(v[1]-t[1]) < tol && Math.abs(v[2]-t[2]) < tol)) matched++;
+        });
+        setResult(matched === targets.length ? 'correct' : 'wrong');
+        if (matched === targets.length) grant('math_solve');
+      };
+
+      const nextChallenge = () => {
+        setChallengeIdx((challengeIdx + 1) % mathChallenges.length);
+        setVertices([]);
+        setResult(null);
+      };
+
+      return html`
+        <div className="w-full h-full relative fade-in">
+          <${Canvas} camera=${{ position: [0, 8, 12], fov: 50 }}>
+            <${Suspense} fallback=${html`<${GlobalLoader} />`}>
+              <ambientLight intensity=${0.6} />
+              <pointLight position=${[10, 10, 10]} intensity=${1} />
+              <${OrbitControls} makeDefault />
+              <${Environment} preset="city" />
+
+              <group>
+                <mesh rotation=${[-Math.PI / 2, 0, 0]} onPointerDown=${handleGridClick}>
+                  <planeGeometry args=${[20, 20]} />
+                  <meshStandardMaterial color="#1e293b" transparent=${true} opacity=${0.8} />
+                  <gridHelper args=${[20, 20, '#6366f1', '#475569']} rotation=${[Math.PI / 2, 0, 0]} position=${[0, 0, 0.01]} />
+                </mesh>
+
+                ${vertices.map((v, i) => html`
+                  <mesh key=${i} position=${v}>
+                    <sphereGeometry args=${[0.25, 16, 16]} />
+                    <meshStandardMaterial color="#3b82f6" emissive="#3b82f6" emissiveIntensity=${0.8} />
+                    <${Html} center className="pointer-events-none" position=${[0, 0.6, 0]}>
+                      <span className="text-[10px] font-mono bg-black/80 text-blue-300 px-2 py-0.5 rounded-md border border-blue-500/40 whitespace-nowrap">(${v[0]}, ${v[2]})</span>
+                    <//>
+                  </mesh>
+                `)}
+                
+                ${vertices.length > 1 && html`
+                  <${Line} points=${vertices} color="#60a5fa" lineWidth=${4} />
+                `}
+
+                <!-- Ghost target markers -->
+                ${challenge.targets.map((t, i) => html`
+                  <mesh key=${'target-'+i} position=${t}>
+                    <sphereGeometry args=${[0.15, 8, 8]} />
+                    <meshBasicMaterial color="#fbbf24" transparent opacity=${0.25} wireframe />
+                  </mesh>
+                `)}
+              </group>
+            <//>
+          <//>
+
+          <!-- Challenge Panel -->
+          <div className="absolute top-10 left-1/2 -translate-x-1/2 glass bg-[#0a0a0a]/80 px-8 py-5 rounded-2xl border border-indigo-500/30 max-w-2xl text-center shadow-2xl">
+            <p className="text-xs uppercase tracking-widest text-indigo-400 font-bold mb-2">Challenge ${challengeIdx + 1} of ${mathChallenges.length}</p>
+            <p className="text-lg font-semibold text-white leading-snug">${challenge.q}</p>
+          </div>
+
+          <!-- Right Controls -->
+          <div className="absolute top-10 right-10 flex flex-col items-end space-y-3">
+             <div className="glass px-5 py-3 rounded-2xl flex items-center space-x-3 border border-blue-500/30">
+               <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">${vertices.length} / 8</span>
+               <span className="text-xs font-bold text-blue-200 uppercase tracking-widest leading-none">Vertices</span>
+             </div>
+             <button onClick=${() => { setVertices([]); setResult(null); }} className="glass px-5 py-2.5 rounded-full flex items-center space-x-2 border-white/20 hover:bg-white/10 transition-all font-bold uppercase tracking-widest text-xs">
+                <${RotateCcw} size=${14} className="text-blue-400" />
+                <span>Reset</span>
+             </button>
+             <button onClick=${checkAnswer} className="glass px-5 py-2.5 rounded-full flex items-center space-x-2 border border-emerald-500/40 hover:bg-emerald-900/30 transition-all font-bold uppercase tracking-widest text-xs text-emerald-300">
+                <${Check} size=${14} />
+                <span>Verify</span>
+             </button>
+             <button onClick=${nextChallenge} className="glass px-5 py-2.5 rounded-full flex items-center space-x-2 border border-amber-500/40 hover:bg-amber-900/30 transition-all font-bold uppercase tracking-widest text-xs text-amber-300">
+                <${Sparkles} size=${14} />
+                <span>Next Challenge</span>
+             </button>
+          </div>
+
+          <!-- Result Feedback -->
+          ${result === 'correct' && html`<div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-emerald-950/90 text-emerald-400 font-bold text-xl px-8 py-4 rounded-full border border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.3)] uppercase tracking-widest flex items-center"><${Check} className="mr-3" size=${24} /> Correct! Well done!</div>`}
+          ${result === 'wrong' && html`<div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-red-950/90 text-red-400 font-bold text-xl px-8 py-4 rounded-full border border-red-500/50 uppercase tracking-widest">Coordinates don't match. Try again!</div>`}
+          ${result === 'incomplete' && html`<div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-amber-950/90 text-amber-400 font-bold text-xl px-8 py-4 rounded-full border border-amber-500/50 uppercase tracking-widest">Place more vertices first!</div>`}
+        </div>
+      `;
+    };
+
+    /* --- 2. HISTORY MODULE (CHRONOS GLOBE) --- */
+    const markers = [
+      { id: 'rome', name: 'Rome, Italy', title: 'The Colosseum', desc: 'The largest ancient amphitheatre ever built, serving as the epicentre of Roman entertainment.', lat: 41.8902, lng: 12.4922 },
+      { id: 'giza', name: 'Giza, Egypt', title: 'Great Pyramid', desc: 'The oldest and largest of the pyramids in the Giza pyramid complex, a testament to ancient structural mastery.', lat: 29.9792, lng: 31.1342 },
+      { id: 'machu', name: 'Cusco Region, Peru', title: 'Machu Picchu', desc: 'A 15th-century Inca citadel built flawlessly into the treacherous Eastern Cordillera mountain range.', lat: -13.1631, lng: -72.5450 },
+      { id: 'kyoto', name: 'Kyoto, Japan', title: 'Kinkaku-ji', desc: 'The Golden Pavilion, originally a shogun retirement villa, now a Zen Buddhist temple representing ancient culture.', lat: 35.0394, lng: 135.7292 }
+    ];
+
+    const latLngToVector3 = (lat, lng, radius) => {
+      const phi = (90 - lat) * (Math.PI / 180);
+      const theta = (lng + 180) * (Math.PI / 180);
+      return new THREE.Vector3(-(radius * Math.sin(phi) * Math.cos(theta)), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
+    };
+
+    // Procedural Earth texture via canvas
+    const createEarthTexture = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024; canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      // Ocean
+      ctx.fillStyle = '#1a3a5c';
+      ctx.fillRect(0, 0, 1024, 512);
+      // Simplified continent shapes (rough lat/lng mapped to pixel)
+      const toPixel = (lat, lng) => [((lng + 180)/360)*1024, ((90-lat)/180)*512];
+      ctx.fillStyle = '#2d6a3f';
+      const continents = [
+        // North America
+        [[50,-130],[55,-60],[30,-80],[25,-100],[35,-120]],
+        // South America
+        [[-5,-80],[-5,-35],[-50,-70],[-55,-68],[-35,-55]],
+        // Europe
+        [[60,-10],[60,40],[35,30],[35,-10]],
+        // Africa
+        [[35,-10],[35,50],[0,45],[-35,30],[-35,15],[5,-15]],
+        // Asia
+        [[60,40],[60,140],[30,120],[10,105],[25,60],[35,50]],
+        // Australia
+        [[-12,115],[-12,155],[-40,150],[-35,115]],
+        // Antarctica
+        [[-65,-180],[-65,180],[-90,180],[-90,-180]],
+      ];
+      continents.forEach(pts => {
+        ctx.beginPath();
+        const [sx,sy] = toPixel(pts[0][0], pts[0][1]);
+        ctx.moveTo(sx, sy);
+        pts.slice(1).forEach(([lat,lng]) => { const [px,py] = toPixel(lat, lng); ctx.lineTo(px, py); });
+        ctx.closePath();
+        ctx.fill();
+      });
+      // Add ice caps
+      ctx.fillStyle = '#c8d8e4';
+      ctx.fillRect(0, 0, 1024, 30); // North pole
+      ctx.fillRect(0, 482, 1024, 30); // South pole
+      const tex = new THREE.CanvasTexture(canvas);
+      return tex;
+    };
+
+    const EarthMesh = () => {
+      const matRef = useRef();
+      useEffect(() => {
+        if (matRef.current) {
+          matRef.current.map = createEarthTexture();
+          matRef.current.needsUpdate = true;
+        }
+      }, []);
+      return html`
+        <mesh>
+          <sphereGeometry args=${[5, 64, 64]} />
+          <meshStandardMaterial ref=${matRef} roughness=${0.7} metalness=${0.1} />
+        </mesh>
+      `;
+    };
+
+    const ChronosGlobeCanvas = () => {
+      const [activeMarker, setActiveMarker] = useState(null);
+      const { grant } = useRewards();
+      const visitedRef = useRef(new Set());
+
+      const handleMarkerClick = (e, m) => {
+        e.stopPropagation();
+        setActiveMarker(m);
+        visitedRef.current.add(m.id);
+        if (visitedRef.current.size >= 2) grant('history_visit');
+      };
+
+      return html`
+        <div className="w-full h-full relative fade-in">
+          <${Canvas} camera=${{ position: [0, 0, 16], fov: 45 }}>
+            <${Suspense} fallback=${html`<${GlobalLoader} />`}>
+              <ambientLight intensity=${0.8} />
+              <pointLight position=${[20, 10, 20]} intensity=${2} color="#fcd34d" />
+              <pointLight position=${[-20, -10, -20]} intensity=${0.8} color="#3b82f6" />
+              
+              <${OrbitControls} makeDefault enablePan=${false} autoRotate=${!activeMarker} autoRotateSpeed=${0.8} minDistance=${8} maxDistance=${25} />
+              
+              <group>
+                <${EarthMesh} />
+                
+                <!-- Wireframe overlay -->
+                <mesh>
+                  <sphereGeometry args=${[5.02, 48, 48]} />
+                  <meshBasicMaterial color="#60a5fa" wireframe=${true} transparent=${true} opacity=${0.1} />
+                </mesh>
+
+                <!-- Atmosphere glow -->
+                <mesh>
+                  <sphereGeometry args=${[5.4, 32, 32]} />
+                  <meshBasicMaterial color="#4facfe" transparent=${true} opacity=${0.08} side=${THREE.BackSide} />
+                </mesh>
+
+                <!-- Markers -->
+                ${markers.map(m => {
+                  const pos = latLngToVector3(m.lat, m.lng, 5.1);
+                  const isSelected = activeMarker?.id === m.id;
+                  
+                  return html`
+                    <mesh 
+                      key=${m.id} 
+                      position=${[pos.x, pos.y, pos.z]} 
+                      onClick=${(e) => handleMarkerClick(e, m)}
+                      onPointerOver=${() => document.body.style.cursor = 'pointer'}
+                      onPointerOut=${() => document.body.style.cursor = 'auto'}
+                    >
+                      <sphereGeometry args=${[isSelected ? 0.35 : 0.2, 16, 16]} />
+                      <meshStandardMaterial color=${isSelected ? '#fbbf24' : '#ef4444'} emissive=${isSelected ? '#fbbf24' : '#ef4444'} emissiveIntensity=${0.8} />
+                    </mesh>
+                  `
+                })}
+              </group>
+            <//>
+          <//>
+
+          <!-- Framer Motion Info Panel -->
+          <div className="absolute right-12 top-1/2 -translate-y-1/2 perspective-[1000px] pointer-events-none">
+             <${AnimatePresence}>
+                ${activeMarker && html`
+                  <${motion.div}
+                    key="info-card"
+                    initial=${{ opacity: 0, x: 100, rotateY: -20 }}
+                    animate=${{ opacity: 1, x: 0, rotateY: 0 }}
+                    exit=${{ opacity: 0, x: 50, rotateY: 20 }}
+                    transition=${{ type: 'spring', damping: 20 }}
+                    className="glass w-96 rounded-3xl p-8 border border-amber-500/40 shadow-[0_0_50px_rgba(251,191,36,0.15)] pointer-events-auto bg-[#0a0a0a]/90"
+                  >
+                     <div className="flex justify-between items-start mb-4">
+                        <h2 className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-br from-amber-300 to-orange-500 tracking-tighter">${activeMarker.name}</h2>
+                        <button onClick=${() => setActiveMarker(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors">
+                            <${Check} size=${18} className="transform rotate-45" />
+                        </button>
+                     </div>
+                     <span className="inline-block px-3 py-1 bg-amber-500/20 text-amber-300 font-bold tracking-widest uppercase text-xs rounded-md mb-6">${activeMarker.title}</span>
+                     <p className="text-amber-100/70 leading-relaxed font-light">${activeMarker.desc}</p>
+                  <//>
+                `}
+             <//>
+          </div>
+        </div>
+      `;
+    };
+
+    /* --- 3. LANGUAGE MODULE (SYNTAX CITY) --- */
+    const WordCube = ({ word, targetPos, onClick, isSlotted }) => {
+        const meshRef = useRef();
+
+        useEffect(() => {
+            if (!meshRef.current) return;
+            if (!meshRef.current.userData.initialized) {
+                meshRef.current.position.set(targetPos[0], targetPos[1], targetPos[2]);
+                meshRef.current.userData.initialized = true;
+            } else {
+                // TWEEN.js Interpolation
+                new TWEEN.Tween(meshRef.current.position)
+                    .to({ x: targetPos[0], y: targetPos[1], z: targetPos[2] }, 500)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .start();
+            }
+        }, [targetPos]);
+
+        return html`
+            <mesh 
+                ref=${meshRef}
+                onClick=${onClick}
+                onPointerOver=${() => document.body.style.cursor = 'pointer'}
+                onPointerOut=${() => document.body.style.cursor = 'auto'}
+            >
+                <boxGeometry args=${[2, 2, 2]} />
+                <meshStandardMaterial color=${word.color} roughness=${0.3} emissive=${word.color} emissiveIntensity=${isSlotted ? 0.3 : 0.1} />
+                <${Html} center className="pointer-events-none">
+                    <div className="flex flex-col items-center bg-[#0a0a0a]/80 backdrop-blur-md px-6 py-3 rounded-xl border border-white/20 select-none shadow-xl">
+                        <span className="text-xl font-bold whitespace-nowrap text-white drop-shadow-md tracking-tight">${word.label}</span>
+                        <span className="text-[10px] uppercase font-black tracking-widest mt-1 opacity-70" style=${{color: word.color}}>${word.type}</span>
+                    </div>
+                <//>
+            </mesh>
+        `;
+    };
+
+    const sentenceSets = [
+      { words: [
+        { id: 'subj1', label: 'The Cat', type: 'Subject', color: '#3b82f6' },
+        { id: 'verb1', label: 'Eats', type: 'Verb', color: '#ec4899' },
+        { id: 'obj1', label: 'The Apple', type: 'Object', color: '#10b981' },
+        { id: 'verb1x', label: 'Runs', type: 'Verb', color: '#ec4899' },
+        { id: 'obj1x', label: 'A Ball', type: 'Object', color: '#10b981' },
+      ], answer: ['Subject', 'Verb', 'Object'] },
+      { words: [
+        { id: 'subj2', label: 'She', type: 'Subject', color: '#3b82f6' },
+        { id: 'verb2', label: 'Reads', type: 'Verb', color: '#ec4899' },
+        { id: 'obj2', label: 'A Book', type: 'Object', color: '#10b981' },
+        { id: 'subj2x', label: 'They', type: 'Subject', color: '#3b82f6' },
+        { id: 'verb2x', label: 'Writes', type: 'Verb', color: '#ec4899' },
+      ], answer: ['Subject', 'Verb', 'Object'] },
+      { words: [
+        { id: 'subj3', label: 'The Dog', type: 'Subject', color: '#3b82f6' },
+        { id: 'verb3', label: 'Chases', type: 'Verb', color: '#ec4899' },
+        { id: 'obj3', label: 'The Ball', type: 'Object', color: '#10b981' },
+        { id: 'obj3x', label: 'The Stick', type: 'Object', color: '#10b981' },
+        { id: 'subj3x', label: 'A Bird', type: 'Subject', color: '#3b82f6' },
+      ], answer: ['Subject', 'Verb', 'Object'] },
+    ];
+
+    const SyntaxCanvas = () => {
+      const [setIdx, setSetIdx] = useState(0);
+      const [slots, setSlots] = useState([]); 
+      const [isCorrect, setIsCorrect] = useState(null); 
+      const { grant } = useRewards();
+      const currentSet = sentenceSets[setIdx];
+      const words = currentSet.words;
+
+      const handleCubeClick = (wordObj) => {
+        if (slots.some(w => w.id === wordObj.id)) {
+            setSlots(slots.filter(w => w.id !== wordObj.id));
+        } else {
+            if (slots.length < 3) setSlots([...slots, wordObj]);
+        }
+        setIsCorrect(null);
+      };
+
+      const checkSentence = () => {
+        if (slots.length !== 3) return;
+        const types = slots.map(s => s.type);
+        if (types[0] === 'Subject' && types[1] === 'Verb' && types[2] === 'Object') { setIsCorrect(true); grant('language_solve'); }
+        else setIsCorrect(false);
+      };
+
+      const nextSentence = () => {
+        setSetIdx((setIdx + 1) % sentenceSets.length);
+        setSlots([]);
+        setIsCorrect(null);
+      };
+
+      return html`
+        <div className=${`w-full h-full relative fade-in transition-colors duration-1000 ${isCorrect === true ? 'bg-emerald-950/80' : isCorrect === false ? 'bg-red-950/80' : 'bg-transparent'}`}>
+          <${Canvas} camera=${{ position: [0, 6, 16], fov: 50 }}>
+            <${Suspense} fallback=${html`<${GlobalLoader} />`}>
+              <${TweenRoot} />
+              <ambientLight intensity=${0.6} />
+              <pointLight position=${[10, 10, 10]} intensity=${1} />
+              <${OrbitControls} makeDefault enableZoom=${false} minPolarAngle=${Math.PI/4} maxPolarAngle=${Math.PI/2} />
+              
+              <group position=${[0, -1, 0]}>
+                <!-- 3 Target Slots -->
+                ${[0, 1, 2].map(i => html`
+                    <group key=${`slot-${i}`}>
+                      <mesh position=${[-4 + (i * 4), 1, -2]}>
+                          <boxGeometry args=${[2.2, 2.2, 2.2]} />
+                          <meshBasicMaterial color="white" wireframe transparent opacity=${0.1} />
+                      </mesh>
+                      <${Html} center position=${[-4 + (i * 4), -0.5, -2]} className="pointer-events-none">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-white/30">${['Subject','Verb','Object'][i]}</span>
+                      <//>
+                    </group>
+                `)}
+
+                <!-- Word Cubes (5 blocks, laid out in arc) -->
+                ${words.map((w, index) => {
+                    const slotIndex = slots.findIndex(s => s.id === w.id);
+                    const isSlotted = slotIndex !== -1;
+                    const spreadX = (index - 2) * 3.5;
+                    const tx = isSlotted ? (-4 + (slotIndex * 4)) : spreadX;
+                    const ty = isSlotted ? 1 : 5;
+                    const tz = isSlotted ? -2 : 4;
+
+                    return html`<${WordCube} key=${w.id} word=${w} targetPos=${[tx, ty, tz]} isSlotted=${isSlotted} onClick=${() => handleCubeClick(w)} />`;
+                })}
+              </group>
+            <//>
+          <//>
+
+          <!-- Sentence Set Indicator -->
+          <div className="absolute top-10 left-1/2 -translate-x-1/2 glass bg-[#0a0a0a]/80 px-8 py-4 rounded-2xl border border-indigo-500/30 text-center">
+            <p className="text-xs uppercase tracking-widest text-indigo-400 font-bold mb-1">Sentence ${setIdx + 1} of ${sentenceSets.length}</p>
+            <p className="text-sm text-white/70">Pick 3 cubes in Subject -> Verb -> Object order</p>
+          </div>
+
+          <!-- Validation Panel -->
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center z-50">
+             <div className="flex space-x-4 mb-6">
+               ${slots.length === 3 && html`
+                  <button onClick=${checkSentence}
+                    className="px-10 py-4 glass bg-[#0a0a0a]/50 rounded-full font-black text-lg uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center">
+                    <${Sparkles} className="mr-3 text-yellow-300" /> Check
+                  </button>
+               `}
+               <button onClick=${nextSentence}
+                 className="px-8 py-4 glass bg-[#0a0a0a]/50 rounded-full font-bold text-sm uppercase tracking-widest text-amber-300 border border-amber-500/40 hover:bg-amber-900/20 transition-all flex items-center">
+                 Next Sentence
+               </button>
+             </div>
+             
+             ${isCorrect === true && html`
+                <div className="text-emerald-400 font-bold text-xl tracking-widest uppercase bg-emerald-950/90 px-8 py-4 rounded-full border border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.3)] flex items-center">
+                    <${Check} className="mr-3" size=${28} /> Correct! Well done!
+                </div>
+             `}
+             ${isCorrect === false && html`
+                <div className="text-red-400 font-bold text-xl tracking-widest uppercase bg-red-950/90 px-8 py-4 rounded-full border border-red-500/50">
+                   Wrong order! Must be Subject -> Verb -> Object.
+                </div>
+             `}
+          </div>
+        </div>
+      `;
+    };
+
+    /* --- 4. GEOGRAPHY MODULE (TECTONIC SIMULATOR) --- */
+    // Earthquake camera shake component
+    const EarthquakeShake = ({ intensity }) => {
+      const { camera } = useThree();
+      const basePos = useRef(null);
+      useFrame((state) => {
+        if (!basePos.current) basePos.current = camera.position.clone();
+        if (intensity > 1) {
+          const shake = (intensity - 1) * 0.04;
+          camera.position.x = basePos.current.x + (Math.random() - 0.5) * shake;
+          camera.position.y = basePos.current.y + (Math.random() - 0.5) * shake;
+          camera.position.z = basePos.current.z + (Math.random() - 0.5) * shake * 0.5;
+        } else if (basePos.current) {
+          camera.position.lerp(basePos.current, 0.1);
+        }
+      });
+      return null;
+    };
+
+    const TectonicPlate = ({ isLeft, convergentValue }) => {
+      const meshRef = useRef();
+      const origRef = useRef(null);
+
+      useFrame((state) => {
+        if (!meshRef.current) return;
+        const geom = meshRef.current.geometry;
+        const posAttr = geom.attributes.position;
+        const time = state.clock.elapsedTime;
+        
+        if (!origRef.current) origRef.current = new Float32Array(posAttr.array);
+
+        let offsetX = 0;
+        if (convergentValue < 0) offsetX = isLeft ? convergentValue : -convergentValue;
+        
+        meshRef.current.position.x = (isLeft ? -5 : 5) + offsetX;
+
+        for (let i = 0; i < posAttr.count; i++) {
+            const vx = origRef.current[i*3];
+            const vy = origRef.current[i*3 + 1]; 
+            const vz = origRef.current[i*3 + 2]; 
+            
+            let heightOffset = 0;
+            if (convergentValue > 0 && vy > 0) {
+                const distToBoundary = isLeft ? Math.abs(5 - vx) : Math.abs(-5 - vx);
+                if (distToBoundary < 4) {
+                     let h = (4 - distToBoundary) * convergentValue * 0.4;
+                     h += Math.sin(vz * 3) * 0.5 * (convergentValue/5) * Math.max(0, 2 - distToBoundary);
+                     // Earthquake tremor effect near boundary
+                     if (convergentValue > 2 && distToBoundary < 2) {
+                       h += Math.sin(time * 15 + vz * 5) * 0.15 * convergentValue * (1 - distToBoundary/2);
+                     }
+                     heightOffset = h;
+                }
+            }
+            posAttr.setY(i, vy + heightOffset);
+        }
+        posAttr.needsUpdate = true;
+        geom.computeVertexNormals();
+      });
+
+      return html`
+        <mesh ref=${meshRef} position=${[0, 0, 0]}>
+            <boxGeometry args=${[10, 2, 20, 64, 2, 64]} />
+            <meshStandardMaterial color="#2d3748" roughness=${0.9} />
+        </mesh>
+      `;
+    };
+
+    const GeographyCanvas = () => {
+      const [force, setForce] = useState(0);
+      const { grant } = useRewards();
+      const seenRef = useRef({ div: false, conv: false });
+
+      const handleForceChange = (e) => {
+        const val = parseFloat(e.target.value);
+        setForce(val);
+        if (val < -2) seenRef.current.div = true;
+        if (val > 2) seenRef.current.conv = true;
+        if (seenRef.current.div && seenRef.current.conv) grant('geo_explore');
+      };
+
+      return html`
+        <div className="w-full h-full relative fade-in">
+          <${Canvas} camera=${{ position: [0, 10, 20], fov: 45 }}>
+            <${Suspense} fallback=${html`<${GlobalLoader} />`}>
+              <ambientLight intensity=${0.3} />
+              <directionalLight position=${[5, 15, 5]} intensity=${2} color="#fbbf24" castShadow />
+              
+              <${OrbitControls} makeDefault maxPolarAngle=${Math.PI/2 - 0.1} />
+              <${EarthquakeShake} intensity=${force > 0 ? force : 0} />
+
+              <group>
+                  <!-- The Magma Core situated below Y=0 -->
+                  <mesh rotation=${[-Math.PI/2, 0, 0]} position=${[0, -1, 0]}>
+                      <planeGeometry args=${[35, 30]} />
+                      <meshStandardMaterial color="#f00" emissive="#f00" emissiveIntensity=${1.2} />
+                      <pointLight position=${[0, 0, 2]} intensity=${2.5} distance=${20} color="#ff3300" />
+                  </mesh>
+
+                  <!-- Left 3D Plate -->
+                  <${TectonicPlate} isLeft=${true} convergentValue=${force} />
+                  <!-- Right 3D Plate -->
+                  <${TectonicPlate} isLeft=${false} convergentValue=${force} />
+              </group>
+            <//>
+          <//>
+
+          <!-- Tectonic Slider UI -->
+          <div className="absolute bottom-12 left-1/2 transform -translate-x-1/2 glass bg-[#0a0a0a]/80 px-12 py-8 rounded-3xl w-[32rem] max-w-full flex justify-center flex-col shadow-2xl border border-white/10">
+             <div className="flex justify-between w-full mb-8 font-black uppercase tracking-widest text-sm items-center">
+                 <span className=${`transition-colors duration-300 ${force < -1 ? 'text-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]' : 'text-slate-500'}`}>${"<"} Divergent</span>
+                 <span className="text-white/80 text-xs bg-black/50 px-3 py-1 rounded-md border border-white/20 shadow-inner">${force.toFixed(1)} Force</span>
+                 <span className=${`transition-colors duration-300 ${force > 1 ? 'text-blue-500 drop-shadow-[0_0_10px_rgba(59,130,246,0.8)]' : 'text-slate-500'}`}>Convergent ${">"}</span>
+             </div>
+             
+             <input 
+                type="range" min="-5" max="5" step="0.1" value=${force} onChange=${handleForceChange}
+                className="w-full h-3 bg-slate-900 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-8 [&::-webkit-slider-thumb]:h-8 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-[0_0_15px_rgba(255,255,255,0.8)] transition-all"
+                style=${{ background: `linear-gradient(to right, #ef4444 0%, #334155 ${50 + (force*10)}%, #3b82f6 100%)` }}
+             />
+             <p className="text-center mt-6 text-slate-400 text-sm font-light leading-relaxed">Adjust the mantle convection to simulate magma divergence or crustal orogeny (mountain building).</p>
+          </div>
+        </div>
+      `;
+    };
+
+    /* --- GLOBE UI LOGIC --- */
+    const modules = [
+      { id: 'science', title: 'Science Lab', desc: 'Particle Kinetics & Thermodynamics', icon: html`<${Atom} size=${56} strokeWidth=${1.5} />`, color: 'from-cyan-500 to-blue-500' },
+      { id: 'math', title: 'Vertex Weaver', desc: 'Spatial Drawing & Grid Calculus', icon: html`<${Shapes} size=${56} strokeWidth=${1.5} />`, color: 'from-blue-500 to-cyan-400' },
+      { id: 'history', title: 'Chronos Globe', desc: 'Interactive Historical Waypoints', icon: html`<${Globe2} size=${56} strokeWidth=${1.5} />`, color: 'from-amber-500 to-orange-500' },
+      { id: 'language', title: 'Syntax City', desc: '3D Sentence Lexicon Builder', icon: html`<${BookOpen} size=${56} strokeWidth=${1.5} />`, color: 'from-indigo-500 to-violet-500' },
+      { id: 'geo', title: 'Tectonic Simulator', desc: 'Crustal Divergence & Orogeny', icon: html`<${Compass} size=${56} strokeWidth=${1.5} />`, color: 'from-emerald-500 to-teal-400' }
+    ];
+
+    const Dashboard = ({ onSelect }) => {
+      const [mounted, setMounted] = useState(false);
+      const { earned, REWARD_DEFS } = useRewards();
+      useEffect(() => { setTimeout(() => setMounted(true), 100); }, []);
+
+      return html`
+        <div className=${`w-full h-full flex flex-col p-8 overflow-y-auto transition-all duration-1000 transform ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-12'}`}>
+          <header className="mb-20 text-center mt-12 flex-none">
+             <h1 className="text-7xl md:text-[6rem] font-black mb-4 tracking-tighter drop-shadow-2xl">
+               <span className="text-white">Edu</span>
+               <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">verse</span>
+             </h1>
+             <p className="text-xl md:text-2xl text-gray-400 font-light tracking-wide">Interactive 3D Learning Platform</p>
+          </header>
+
+          <div className="flex-none max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-20">
+            ${modules.map((m, i) => html`
+              <div 
+                key=${m.id}
+                onClick=${() => onSelect(m.id)}
+                className=${`glass-card bg-[#111] rounded-[2rem] p-10 cursor-pointer group relative overflow-hidden flex items-center ${i === 0 ? 'md:col-span-2 lg:col-span-1' : ''}`}
+                style=${{ animationDelay: `${i * 100}ms` }}
+              >
+                <div className=${`absolute -right-20 -top-20 w-80 h-80 bg-gradient-to-br ${m.color} rounded-full mix-blend-screen filter blur-3xl opacity-20 group-hover:opacity-40 transition-opacity duration-700`}></div>
+                
+                <div className="relative z-10 w-full flex items-center space-x-8">
+                  <div className=${`flex-shrink-0 text-white/80 group-hover:text-white transform group-hover:scale-110 transition-all duration-500 drop-shadow-[0_0_20px_rgba(255,255,255,0.1)]`}>
+                      ${m.icon}
+                  </div>
+                  <div className="flex-1">
+                    <h2 className="font-bold text-3xl tracking-tight mb-2">${m.title}</h2>
+                    <p className="text-gray-400 font-light text-lg">${m.desc}</p>
+                  </div>
+                </div>
+              </div>
+            `)}
+          </div>
+
+          <!-- Rewards Showcase -->
+          <div className="flex-none max-w-7xl mx-auto w-full pb-20">
+            <div className="glass-card bg-[#111] rounded-[2rem] p-8">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-4">
+                  <${Trophy} size=${28} className="text-amber-400" />
+                  <h2 className="text-2xl font-bold tracking-tight">Achievements</h2>
+                </div>
+                <span className="text-amber-400 font-black text-lg">${earned.length} / ${REWARD_DEFS.length}</span>
+              </div>
+              <div className="w-full bg-white/5 rounded-full h-3 mb-8 overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 transition-all duration-1000 shadow-[0_0_15px_rgba(245,158,11,0.5)]" style=${{ width: `${(earned.length / REWARD_DEFS.length) * 100}%` }}></div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                ${REWARD_DEFS.map(r => {
+                  const unlocked = earned.includes(r.id);
+                  return html`
+                    <div key=${r.id} className=${`rounded-2xl p-5 text-center transition-all duration-300 border ${unlocked ? 'bg-amber-500/10 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.1)]' : 'bg-white/[0.02] border-white/5 opacity-40'}`}>
+                      <div className=${`w-12 h-12 rounded-full mx-auto mb-3 flex items-center justify-center ${unlocked ? 'bg-gradient-to-br from-yellow-400 to-amber-600' : 'bg-white/5'}`}>
+                        ${unlocked ? html`<${Trophy} size=${20} className="text-white" />` : html`<${Award} size=${20} className="text-white/30" />`}
+                      </div>
+                      <p className=${`text-sm font-bold tracking-tight ${unlocked ? 'text-amber-300' : 'text-white/30'}`}>${r.title}</p>
+                      <p className="text-[10px] text-white/40 mt-1">${r.desc}</p>
+                    </div>
+                  `;
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
+    /* --- ROOT APP --- */
+    const App = () => {
+      const [view, setView] = useState('dashboard');
+
+      return html`
+        <${ErrorBoundary}>
+          <div className="w-full h-full flex flex-col relative overflow-hidden">
+            ${view !== 'dashboard' && html`
+              <div className="absolute top-8 left-8 z-[100]">
+                <button 
+                  onClick=${() => setView('dashboard')}
+                  className="group glass bg-[#0a0a0a]/50 px-6 py-3 rounded-full flex items-center space-x-3 hover:bg-white/10 transition-all duration-300 text-xs font-bold uppercase tracking-widest border border-white/20 shadow-[0_4px_30px_rgba(0,0,0,0.5)]"
+                >
+                  <svg className="w-5 h-5 text-gray-400 group-hover:text-white transition-colors group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                  <span className="text-gray-300 group-hover:text-white transition-colors">Back to Dashboard</span>
+                </button>
+              </div>
+            `}
+
+            <main className="flex-1 w-full h-full relative">
+              ${view === 'dashboard' && html`<${Dashboard} onSelect=${setView} />`}
+              ${view === 'science' && html`<${ScienceCanvas} />`}
+              ${view === 'math' && html`<${VertexWeaverCanvas} />`}
+              ${view === 'history' && html`<${ChronosGlobeCanvas} />`}
+              ${view === 'language' && html`<${SyntaxCanvas} />`}
+              ${view === 'geo' && html`<${GeographyCanvas} />`}
+            </main>
+          </div>
+        <//>
+      `;
+    };
+
+    const rootElement = document.getElementById('root');
+    const root = createRoot(rootElement);
+    root.render(html`<${RewardProvider}><${App} /><//>`);
+  </script>
+</body>
+</html>
